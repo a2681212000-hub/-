@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Office Agent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">OA</span><span>Office Agent</span></div>
+      <span class="status"><i></i> 本地服务</span>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">WORKSPACE AUTOMATION</p>
+        <h1>让重复工作<br><span>自动完成。</span></h1>
+        <p class="intro">把文件交给 Agent，它会整理数据、检查异常，并生成可以直接使用的报告。</p>
+      </div>
+      <div class="hero-stat"><strong id="runCount">0</strong><span>本次运行</span></div>
+    </section>
+
+    <section class="workspace">
+      <div class="panel task-panel">
+        <div class="panel-head"><div><p class="label">新建任务</p><h2>处理一批报表</h2></div><span class="step">01</span></div>
+        <label for="task">任务描述</label>
+        <textarea id="task">处理网页采集报表</textarea>
+        <label for="folder">数据来源</label>
+        <div class="folder-input"><span class="folder-icon">↳</span><input id="folder" value="D:\\ai\\office-agent\\inbox"><button id="pickFolder" title="选择目录">选择</button></div>
+        <div class="action-row"><button class="primary" id="runBtn"><span>▶</span> 开始处理</button><span class="hint">支持 CSV、TSV、XLSX</span></div>
+      </div>
+
+      <div class="panel result-panel">
+        <div class="panel-head"><div><p class="label">执行结果</p><h2 id="resultTitle">等待任务</h2></div><span class="result-icon" id="resultIcon">—</span></div>
+        <div class="metrics">
+          <div><span>读取文件</span><strong id="files">—</strong></div>
+          <div><span>输出行数</span><strong id="rows">—</strong></div>
+          <div><span>异常数量</span><strong id="issues">—</strong></div>
+        </div>
+        <div class="output-box"><span>报告位置</span><code id="output">尚未生成</code><button id="openReport" title="打开报告">↗</button></div>
+        <div class="log" id="log"><span class="log-dot"></span><span>准备就绪，等待你开始任务。</span></div>
+      </div>
+    </section>
+
+    <section class="recent">
+      <div class="section-head"><div><p class="label">最近执行</p><h2>任务记录</h2></div><button class="text-button" id="clearHistory">清空记录</button></div>
+      <div class="history" id="history"><div class="empty">还没有执行记录</div></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
