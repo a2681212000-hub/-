@@ -15,6 +15,12 @@ DEFAULT_INPUT = ROOT / "data"
 YINGDAO_INBOX = ROOT / "inbox"
 DEFAULT_OUTPUT = ROOT / "output"
 
+ALLOWED_TOOLS = {
+    "list_files": "扫描输入目录中的 CSV、TSV、XLSX 文件",
+    "process_report": "合并、去重、汇总并生成 Excel 报告",
+    "list_reports": "查看最近生成的报告",
+}
+
 FIELD_ALIASES = {
     "order_id": {"订单号", "订单编号", "order_id", "orderid", "id"},
     "date": {"日期", "下单日期", "date", "order_date"},
@@ -149,6 +155,36 @@ def understand(text):
         "needs_confirmation": any(x in text for x in ["发送", "删除", "提交"]),
         "raw": text,
     }
+
+
+def plan_task(text):
+    """Create a local fallback plan using only registered tools."""
+    lowered = text.lower()
+    if any(word in text for word in ["最近报告", "历史报告", "生成过的报告"]) or "report" in lowered:
+        return {"steps": [{"tool": "list_reports", "reason": "查看最近生成的报告"}]}
+    if any(word in text for word in ["扫描", "查找文件", "有哪些文件", "文件列表"]):
+        return {"steps": [{"tool": "list_files", "reason": "扫描输入目录"}]}
+    return {"steps": [
+        {"tool": "list_files", "reason": "确认输入文件"},
+        {"tool": "process_report", "reason": "生成整理后的报表"},
+    ]}
+
+
+def execute_tool(tool, task, folder):
+    """Run one registered tool and return structured output."""
+    folder = Path(folder)
+    if tool == "list_files":
+        files = find_files(folder)
+        return {"tool": tool, "files": [str(path) for path in files], "count": len(files)}
+    if tool == "list_reports":
+        files = sorted(DEFAULT_OUTPUT.glob("report_*.xlsx"), key=lambda path: path.stat().st_mtime, reverse=True)
+        return {"tool": tool, "reports": [str(path) for path in files[:10]], "count": min(len(files), 10)}
+    if tool == "process_report":
+        message = run(task, folder_override=folder)
+        summary_file = DEFAULT_OUTPUT / "last_run.json"
+        details = json.loads(summary_file.read_text(encoding="utf-8")) if summary_file.exists() else {}
+        return {"tool": tool, "message": message, "output": details.get("output"), "rows": details.get("rows", 0), "problems": details.get("problems", [])}
+    raise ValueError(f"不允许调用工具：{tool}")
 
 
 def run(task, folder_override=None):

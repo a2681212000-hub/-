@@ -13,6 +13,13 @@ function renderHistory() {
 }
 renderHistory();
 
+const toolLabels = {list_files:'扫描输入文件', process_report:'处理并生成报告', list_reports:'查看最近报告'};
+function renderPlan(plan) {
+  const steps = plan && Array.isArray(plan.steps) ? plan.steps : [];
+  $('planBox').hidden = !steps.length;
+  $('planSteps').innerHTML = steps.map((step, index) => `<span class="plan-step"><b>${index + 1}</b>${toolLabels[step.tool] || step.tool}</span>`).join('');
+}
+
 $('runBtn').addEventListener('click', () => {
   const btn = $('runBtn');
   btn.disabled = true; btn.innerHTML = '<span>…</span> 处理中';
@@ -23,6 +30,7 @@ $('runBtn').addEventListener('click', () => {
   .then(response => response.json())
   .then(data => {
     if (!data.ok) throw new Error(data.error || '任务执行失败');
+    renderPlan(data.plan);
     runs += 1; $('runCount').textContent = runs; localStorage.setItem('office-agent-runs', runs);
     const now = new Date(); const time = now.toLocaleString('zh-CN', {hour12:false});
     const outputMatch = data.message.match(/报告：(.+)/); const output = outputMatch ? outputMatch[1].trim() : '已生成';
