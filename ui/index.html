@@ -49,6 +49,18 @@
       <div class="history" id="history"><div class="empty">还没有执行记录</div></div>
     </section>
   </main>
+  <button class="settings-fab" id="settingsBtn" title="打开设置">⚙</button>
+  <div class="settings-overlay" id="settingsOverlay" hidden>
+    <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="settings-head"><div><p class="label">CONFIGURATION</p><h2 id="settingsTitle">Agent 设置</h2></div><button class="close-button" id="closeSettings" title="关闭">×</button></div>
+      <p class="settings-copy">配置 OpenAI 兼容模型，留空时使用本地规则。</p>
+      <label for="aiBaseUrl">接口地址</label><input class="settings-input" id="aiBaseUrl" placeholder="https://api.openai.com/v1/chat/completions">
+      <label for="aiModel">模型名称</label><input class="settings-input" id="aiModel" placeholder="gpt-4o-mini">
+      <label for="aiKey">API 密钥</label><input class="settings-input" id="aiKey" type="password" placeholder="仅保存在本机浏览器">
+      <div class="settings-actions"><button class="secondary" id="clearLocal">清除本地记录</button><button class="primary" id="saveSettings">保存设置</button></div>
+      <p class="settings-note" id="settingsNote"></p>
+    </section>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>

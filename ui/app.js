@@ -1,7 +1,10 @@
 const $ = (id) => document.getElementById(id);
 let runs = Number(localStorage.getItem('office-agent-runs') || 0);
 let history = JSON.parse(localStorage.getItem('office-agent-history') || '[]');
+const aiSettings = JSON.parse(localStorage.getItem('office-agent-ai') || '{}');
 $('runCount').textContent = runs;
+$('aiBaseUrl').value = aiSettings.base_url || '';
+$('aiModel').value = aiSettings.model || '';
 
 function renderHistory() {
   const el = $('history');
@@ -15,7 +18,8 @@ $('runBtn').addEventListener('click', () => {
   btn.disabled = true; btn.innerHTML = '<span>…</span> 处理中';
   $('resultTitle').textContent = '正在处理'; $('resultIcon').textContent = '…';
   $('log').className = 'log'; $('log').innerHTML = '<span class="log-dot"></span><span>正在读取数据并检查字段…</span>';
-  fetch('/api/task', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task:$('task').value, folder:$('folder').value})})
+  const ai = {base_url:$('aiBaseUrl').value.trim(), model:$('aiModel').value.trim(), api_key:$('aiKey').value.trim()};
+  fetch('/api/task', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task:$('task').value, folder:$('folder').value, ai})})
   .then(response => response.json())
   .then(data => {
     if (!data.ok) throw new Error(data.error || '任务执行失败');
@@ -36,3 +40,16 @@ $('runBtn').addEventListener('click', () => {
 $('clearHistory').addEventListener('click', () => { history=[]; localStorage.removeItem('office-agent-history'); renderHistory(); });
 $('pickFolder').addEventListener('click', () => $('folder').focus());
 $('openReport').addEventListener('click', () => { if ($('output').textContent !== '尚未生成') alert('报告路径：' + $('output').textContent); });
+$('settingsBtn').addEventListener('click', () => { $('settingsOverlay').hidden = false; });
+$('closeSettings').addEventListener('click', () => { $('settingsOverlay').hidden = true; });
+$('settingsOverlay').addEventListener('click', (event) => { if (event.target === $('settingsOverlay')) $('settingsOverlay').hidden = true; });
+$('saveSettings').addEventListener('click', () => {
+  localStorage.setItem('office-agent-ai', JSON.stringify({base_url:$('aiBaseUrl').value.trim(), model:$('aiModel').value.trim()}));
+  $('settingsNote').textContent = '设置已保存，密钥只在本次页面运行时使用.';
+  setTimeout(() => {$('settingsOverlay').hidden = true; $('settingsNote').textContent = '';}, 900);
+});
+$('clearLocal').addEventListener('click', () => {
+  if (!confirm('清除浏览器中的执行记录和当前结果？不会删除 inbox 或报告文件。')) return;
+  runs = 0; history = []; localStorage.removeItem('office-agent-runs'); localStorage.removeItem('office-agent-history');
+  $('runCount').textContent = '0'; $('files').textContent = '—'; $('rows').textContent = '—'; $('issues').textContent = '—'; $('output').textContent = '尚未生成'; $('resultTitle').textContent = '等待任务'; $('resultIcon').textContent = '—'; renderHistory(); $('settingsNote').textContent = '本地记录已清除。';
+});

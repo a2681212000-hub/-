@@ -12,15 +12,16 @@ ROOT = Path(__file__).parent
 UI = ROOT / "ui"
 
 
-def model_plan(task):
+def model_plan(task, settings=None):
     """Ask an OpenAI-compatible model for a safe, bounded action."""
-    key = os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    settings = settings or {}
+    key = settings.get("api_key") or os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not key:
         return {"action": "process_report", "reason": "未配置模型，使用本地规则"}
-    payload = {"model": os.getenv("AI_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [
+    payload = {"model": settings.get("model") or os.getenv("AI_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [
         {"role": "system", "content": '你是办公自动化规划器。只允许返回 JSON：{"action":"process_report"}。任何报表、Excel、CSV、销售数据整理请求都用 process_report；其他请求也只能返回 process_report。不要输出 JSON 以外的内容。'},
         {"role": "user", "content": task}]}
-    url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1/chat/completions")
+    url = settings.get("base_url") or os.getenv("AI_BASE_URL", "https://api.openai.com/v1/chat/completions")
     request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -64,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length).decode("utf-8"))
             task = str(body.get("task", "处理报表"))[:200]
             folder = str(body.get("folder", DEFAULT_INPUT))[:500]
-            plan = model_plan(task)
+            plan = model_plan(task, body.get("ai"))
             result = run(task, folder_override=folder)
             self._json(200, {"ok": True, "plan": plan, "message": result})
         except Exception as exc:
