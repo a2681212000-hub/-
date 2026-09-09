@@ -15,16 +15,23 @@ $('runBtn').addEventListener('click', () => {
   btn.disabled = true; btn.innerHTML = '<span>…</span> 处理中';
   $('resultTitle').textContent = '正在处理'; $('resultIcon').textContent = '…';
   $('log').className = 'log'; $('log').innerHTML = '<span class="log-dot"></span><span>正在读取数据并检查字段…</span>';
-  setTimeout(() => {
+  fetch('/api/task', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({task:$('task').value, folder:$('folder').value})})
+  .then(response => response.json())
+  .then(data => {
+    if (!data.ok) throw new Error(data.error || '任务执行失败');
     runs += 1; $('runCount').textContent = runs; localStorage.setItem('office-agent-runs', runs);
     const now = new Date(); const time = now.toLocaleString('zh-CN', {hour12:false});
-    const output = `output/report_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.xlsx`;
+    const outputMatch = data.message.match(/报告：(.+)/); const output = outputMatch ? outputMatch[1].trim() : '已生成';
+    const rowsMatch = data.message.match(/输出 (\d+) 行/); const rowCount = rowsMatch ? rowsMatch[1] : '—';
     $('resultTitle').textContent = '处理完成'; $('resultIcon').textContent = '✓';
-    $('files').textContent = '1'; $('rows').textContent = '3'; $('issues').textContent = '0'; $('output').textContent = output;
+    $('files').textContent = String((data.message.match(/读取 (\d+) 个文件/) || [,'—'])[1]); $('rows').textContent = rowCount; $('issues').textContent = data.message.includes('异常：') ? '有' : '0'; $('output').textContent = output;
     $('log').className = 'log success'; $('log').innerHTML = '<span class="log-dot"></span><span>校验通过，报告已经生成。</span>';
-    history.unshift({task:$('task').value || '报表处理',time,rows:3,output}); history = history.slice(0,6); localStorage.setItem('office-agent-history', JSON.stringify(history)); renderHistory();
+    history.unshift({task:$('task').value || '报表处理',time,rows:rowCount,output}); history = history.slice(0,6); localStorage.setItem('office-agent-history', JSON.stringify(history)); renderHistory();
+  })
+  .catch(error => { $('resultTitle').textContent = '执行失败'; $('resultIcon').textContent = '!'; $('log').className = 'log error'; $('log').innerHTML = `<span class="log-dot"></span><span>${error.message}</span>`; })
+  .finally(() => {
     btn.disabled = false; btn.innerHTML = '<span>▶</span> 开始处理';
-  }, 900);
+  });
 });
 $('clearHistory').addEventListener('click', () => { history=[]; localStorage.removeItem('office-agent-history'); renderHistory(); });
 $('pickFolder').addEventListener('click', () => $('folder').focus());

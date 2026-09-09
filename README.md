@@ -34,3 +34,26 @@ python agent.py "处理报表 文件夹:D:\\my-reports"
 ```
 
 注意：网页采集由影刀执行，Agent 不绕过验证码或登录保护；影刀只需要把合法取得的数据导出到 `inbox`。
+
+## 启动 API 和网页
+
+```powershell
+cd D:\ai\office-agent
+python server.py
+```
+
+打开 `http://127.0.0.1:8787`。网页会调用 `POST /api/task`：
+
+```json
+{"task":"处理网页采集报表","folder":"D:\\ai\\office-agent\\inbox"}
+```
+
+如需让 AI 参与任务规划，配置 OpenAI 兼容接口：
+
+```powershell
+$env:AI_API_KEY="你的密钥"
+$env:AI_MODEL="gpt-4o-mini"
+python server.py
+```
+
+也可以设置 `AI_BASE_URL` 接入其他 OpenAI 兼容模型服务。模型只负责选择受限工具，实际文件处理仍由本地 Agent 执行。

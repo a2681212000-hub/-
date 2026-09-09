@@ -96,11 +96,11 @@ def understand(text):
     }
 
 
-def run(task):
+def run(task, folder_override=None):
     intent = understand(task)
     if intent["action"] == "help":
         return "我目前支持：处理/合并销售报表、去重、检查空字段、生成汇总文件。"
-    folder = intent["folder"]
+    folder = Path(folder_override) if folder_override else intent["folder"]
     # A Yingdao RAP flow exports its web results into inbox, then calls this agent.
     if folder == DEFAULT_INPUT and YINGDAO_INBOX.exists() and find_files(YINGDAO_INBOX):
         folder = YINGDAO_INBOX
