@@ -70,6 +70,20 @@
     </form>
     <div class="schedules-list" id="schedulesList"><div class="empty">正在读取自动任务</div></div>
   </section>
+  <section class="recent workflow-history">
+    <div class="section-head"><div><p class="label">WORKFLOWS</p><h2>工作流模板</h2></div><span class="hint" id="workflowCount"></span></div>
+    <form class="workflow-form" id="workflowForm">
+      <input id="workflowName" placeholder="模板名称，例如：日报处理流程" maxlength="80" required>
+      <input id="workflowTask" placeholder="任务描述" maxlength="2000" value="处理网页采集报表" required>
+      <input id="workflowFolder" placeholder="输入文件夹" value="D:\\ai\\office-agent\\inbox" required>
+      <button class="primary" type="submit">保存模板</button>
+    </form>
+    <div class="workflows-list" id="workflowsList"><div class="empty">正在读取工作流模板</div></div>
+  </section>
+  <section class="recent notification-history">
+    <div class="section-head"><div><p class="label">NOTIFICATIONS</p><h2>通知草稿</h2></div><span class="hint" id="notificationCount"></span></div>
+    <div class="notifications-list" id="notificationsList"><div class="empty">正在读取通知草稿</div></div>
+  </section>
   </main>
   <button class="settings-fab" id="settingsBtn" title="打开设置">⚙</button>
   <div class="settings-overlay" id="settingsOverlay" hidden>

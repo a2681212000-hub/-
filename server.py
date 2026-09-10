@@ -7,12 +7,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from agent import ALLOWED_TOOLS, DEFAULT_INPUT, plan_task
+from notifications import NotificationStore
 from scheduler import ScheduleConflict, ScheduleStore
 from workflow import TaskConflict, TaskStore
+from workflows import WorkflowStore
 
 ROOT = Path(__file__).parent
 UI = ROOT / "ui"
 STORE = TaskStore(ROOT / "runtime" / "tasks")
+NOTIFICATIONS = NotificationStore(ROOT / "runtime" / "notifications")
 
 
 def model_plan(task, settings=None):
@@ -57,11 +60,22 @@ def validate_plan(plan, task):
     return {"steps": safe_steps}
 
 
+def submit_task(task, folder, plan=None):
+    job = STORE.create(task, folder, plan or model_plan(task))
+    NOTIFICATIONS.capture_job(job)
+    return job
+
+
 def submit_scheduled_task(task, folder):
-    return STORE.create(task, folder, model_plan(task))
+    return submit_task(task, folder)
+
+
+def submit_workflow_task(task, folder, plan):
+    return submit_task(task, folder, plan)
 
 
 SCHEDULES = ScheduleStore(ROOT / "runtime" / "schedules", submit_scheduled_task)
+WORKFLOWS = WorkflowStore(ROOT / "runtime" / "workflows", submit_workflow_task, validate_plan)
 
 
 def open_local_path(raw_path, mode="folder"):
@@ -129,6 +143,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/schedules":
             self._json(200, {"ok": True, "schedules": SCHEDULES.list()})
             return
+        if self.path == "/api/workflows":
+            self._json(200, {"ok": True, "workflows": WORKFLOWS.list()})
+            return
+        if self.path == "/api/notifications":
+            self._json(200, {"ok": True, "notifications": NOTIFICATIONS.list()})
+            return
         match = re.fullmatch(r"/api/task/([a-f0-9]+)/?", self.path)
         if match:
             try:
@@ -166,6 +186,39 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, KeyError) as exc:
                 self._json(400, {"ok": False, "error": str(exc)})
             return
+        if self.path == "/api/workflow":
+            try:
+                body = self._body()
+                task = body.get("task", "处理网页采集报表")
+                name = body.get("name")
+                if not name and isinstance(task, str):
+                    name = task[:30]
+                if body.get("ai") is not None and not isinstance(body["ai"], dict):
+                    raise ValueError("模型配置必须是 JSON 对象")
+                plan = body.get("plan") or model_plan(task, body.get("ai"))
+                workflow = WORKFLOWS.create(name, task, body.get("folder"), plan)
+                self._json(201, {"ok": True, "workflow": workflow})
+            except (ValueError, KeyError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
+        workflow_match = re.fullmatch(r"/api/workflow/([a-f0-9]+)/(run|delete)", self.path)
+        if workflow_match:
+            workflow_id, action = workflow_match.groups()
+            try:
+                result = {"workflow": WORKFLOWS.remove(workflow_id)} if action == "delete" else WORKFLOWS.run(workflow_id)
+                self._json(200, {"ok": True, **result})
+            except (KeyError, ValueError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
+        notification_match = re.fullmatch(r"/api/notification/([a-f0-9]+)/mark", self.path)
+        if notification_match:
+            try:
+                body = self._body()
+                notification = NOTIFICATIONS.mark(notification_match.group(1), body.get("status"))
+                self._json(200, {"ok": True, "notification": notification})
+            except (KeyError, ValueError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
         schedule_match = re.fullmatch(r"/api/schedule/([a-f0-9]+)/(toggle|run|delete)", self.path)
         if schedule_match:
             schedule_id, action = schedule_match.groups()
@@ -188,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = self._body()
                 job = STORE.decide(decision_match.group(1), str(body.get("confirmation_id", "")), str(body.get("decision", "")))
+                NOTIFICATIONS.capture_job(job)
                 self._json(200, {"ok": True, "job": job})
             except TaskConflict as exc:
                 self._json(409, {"ok": False, "error": str(exc)})
@@ -209,7 +263,7 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("ai") is not None and not isinstance(body["ai"], dict):
                 raise ValueError("模型配置必须是 JSON 对象")
             plan = model_plan(task, body.get("ai"))
-            job = STORE.create(task, folder, plan)
+            job = submit_task(task, folder, plan)
             self._json(202 if job["status"] == "awaiting_confirmation" else 200, {"ok": True, "job": job, "plan": job["plan"], "results": job["results"], "message": job["message"]})
         except Exception as exc:
             self._json(400, {"ok": False, "error": str(exc)})

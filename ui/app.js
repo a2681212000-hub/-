@@ -8,9 +8,13 @@ $('aiBaseUrl').value = aiSettings.base_url || '';
 $('aiModel').value = aiSettings.model || '';
 let jobs = [];
 let schedules = [];
+let workflows = [];
+let notifications = [];
 let activeJob = null;
 let busy = false;
 let scheduleBusy = false;
+let workflowBusy = false;
+let notificationBusy = false;
 let pollTimer = null;
 const toolLabels = {list_files:'扫描输入文件', process_report:'处理并生成报告', list_reports:'查看最近报告', extract_pdf:'提取 PDF 信息', collect_web:'采集网页数据', list_mail_attachments:'扫描邮件附件', archive_files:'归档文件', notify:'生成通知草稿'};
 const statusLabels = {running:'正在执行', pending:'待执行', approved:'已确认', awaiting_confirmation:'等待确认', completed:'已完成', cancelled:'已取消', expired:'确认已过期', failed:'执行失败', interrupted:'执行中断', skipped:'未执行'};
@@ -93,6 +97,52 @@ function renderSchedules() {
     $('schedulesList').append(row);
   });
 }
+function renderWorkflows() {
+  $('workflowsList').replaceChildren();
+  $('workflowCount').textContent = workflows.length + ' 个模板';
+  if (!workflows.length) {
+    $('workflowsList').append(node('div', '还没有工作流模板', 'empty'));
+    return;
+  }
+  workflows.forEach(workflow => {
+    const row = node('div', '', 'workflow-row');
+    const detail = node('div', '', 'workflow-main');
+    const steps = (workflow.plan.steps || []).map(step => toolLabels[step.tool] || step.tool).join(' → ');
+    detail.append(node('strong', workflow.name), node('span', workflow.task, 'workflow-task'), node('small', workflow.folder + ' · ' + steps));
+    if (workflow.last_status) detail.append(node('small', '上次：' + (statusLabels[workflow.last_status] || workflow.last_status) + ' · ' + (workflow.last_message || ''), 'workflow-last'));
+    const actions = node('div', '', 'workflow-actions');
+    const run = node('button', '运行', 'text-button workflow-button');
+    run.disabled = workflowBusy;
+    run.onclick = () => runWorkflow(workflow.id);
+    const remove = node('button', '删除', 'secondary workflow-button');
+    remove.disabled = workflowBusy;
+    remove.onclick = () => removeWorkflow(workflow);
+    actions.append(run, remove);
+    row.append(detail, actions);
+    $('workflowsList').append(row);
+  });
+}
+function renderNotifications() {
+  $('notificationsList').replaceChildren();
+  const unread = notifications.filter(notification => notification.status === 'draft').length;
+  $('notificationCount').textContent = unread + ' 个待查看';
+  if (!notifications.length) {
+    $('notificationsList').append(node('div', '还没有通知草稿', 'empty'));
+    return;
+  }
+  notifications.forEach(notification => {
+    const row = node('article', '', 'notification-row' + (notification.status === 'read' ? ' read' : ''));
+    const detail = node('div', '', 'notification-main');
+    detail.append(node('strong', notification.title), node('small', dateText(notification.created_at)));
+    detail.append(node('p', notification.body));
+    if (notification.output) detail.append(node('code', notification.output));
+    const mark = node('button', notification.status === 'draft' ? '标记已读' : '标记未读', 'secondary notification-button');
+    mark.disabled = notificationBusy;
+    mark.onclick = () => markNotification(notification);
+    row.append(detail, mark);
+    $('notificationsList').append(row);
+  });
+}
 function renderJob(job) {
   activeJob = job;
   sessionStorage.setItem('office-agent-active-job', job.id);
@@ -161,6 +211,16 @@ async function loadSchedules() {
   schedules = data.schedules;
   renderSchedules();
 }
+async function loadWorkflows() {
+  const data = await api('/api/workflows');
+  workflows = data.workflows;
+  renderWorkflows();
+}
+async function loadNotifications() {
+  const data = await api('/api/notifications');
+  notifications = data.notifications;
+  renderNotifications();
+}
 async function toggleSchedule(schedule) {
   scheduleBusy = true; renderSchedules();
   try { await api('/api/schedule/' + schedule.id + '/toggle', {enabled:!schedule.enabled}); await loadSchedules(); }
@@ -172,9 +232,31 @@ async function runSchedule(id) {
   try {
     const data = await api('/api/schedule/' + id + '/run', {});
     if (data.job) { renderJob(data.job); remember(data.job); schedulePoll(); }
-    await Promise.all([loadSchedules(), loadJobs(false)]);
+    await Promise.all([loadSchedules(), loadJobs(false), loadNotifications()]);
   } catch (error) { setLog('error', error.message); }
   finally { scheduleBusy = false; renderSchedules(); }
+}
+async function runWorkflow(id) {
+  workflowBusy = true; renderWorkflows();
+  try {
+    const data = await api('/api/workflow/' + id + '/run', {});
+    if (data.job) { renderJob(data.job); remember(data.job); schedulePoll(); }
+    await Promise.all([loadWorkflows(), loadJobs(false), loadNotifications()]);
+  } catch (error) { setLog('error', error.message); }
+  finally { workflowBusy = false; renderWorkflows(); }
+}
+async function removeWorkflow(workflow) {
+  if (!confirm('删除工作流模板“' + workflow.name + '”？')) return;
+  workflowBusy = true; renderWorkflows();
+  try { await api('/api/workflow/' + workflow.id + '/delete', {}); await loadWorkflows(); }
+  catch (error) { setLog('error', error.message); }
+  finally { workflowBusy = false; renderWorkflows(); }
+}
+async function markNotification(notification) {
+  notificationBusy = true; renderNotifications();
+  try { await api('/api/notification/' + notification.id + '/mark', {status:notification.status === 'draft' ? 'read' : 'draft'}); await loadNotifications(); }
+  catch (error) { setLog('error', error.message); }
+  finally { notificationBusy = false; renderNotifications(); }
 }
 async function removeSchedule(schedule) {
   if (!confirm('删除自动任务“' + schedule.name + '”？')) return;
@@ -198,7 +280,7 @@ async function decideApproval(decision) {
   busy = true; controls();
   try { const data = await api('/api/task/' + activeJob.id + '/decision', {confirmation_id:activeJob.confirmation.id, decision:decision}); renderJob(data.job); remember(data.job); }
   catch (error) { setLog('error', error.message); }
-  finally { busy = false; controls(); await loadJobs(false).catch(error => setLog('error', error.message)); }
+  finally { busy = false; controls(); await Promise.all([loadJobs(false), loadNotifications()]).catch(error => setLog('error', error.message)); }
 }
 $('runBtn').onclick = async () => {
   if (busy) return;
@@ -206,7 +288,7 @@ $('runBtn').onclick = async () => {
   const ai = {base_url:$('aiBaseUrl').value.trim(), model:$('aiModel').value.trim(), api_key:$('aiKey').value.trim()};
   try { const data = await api('/api/task', {task:$('task').value, folder:$('folder').value, ai:ai}); renderJob(data.job); remember(data.job); }
   catch (error) { $('resultTitle').textContent = '请求失败'; setLog('error', error.message); }
-  finally { busy = false; controls(); await Promise.all([loadJobs(false), loadSchedules()]).catch(error => setLog('error', error.message)); }
+  finally { busy = false; controls(); await Promise.all([loadJobs(false), loadSchedules(), loadNotifications()]).catch(error => setLog('error', error.message)); }
 };
 $('scheduleForm').onsubmit = async event => {
   event.preventDefault();
@@ -219,6 +301,19 @@ $('scheduleForm').onsubmit = async event => {
     await loadSchedules();
   } catch (error) { setLog('error', error.message); }
   finally { scheduleBusy = false; renderSchedules(); }
+};
+$('workflowForm').onsubmit = async event => {
+  event.preventDefault();
+  if (workflowBusy) return;
+  workflowBusy = true; renderWorkflows();
+  try {
+    const ai = {base_url:$('aiBaseUrl').value.trim(), model:$('aiModel').value.trim(), api_key:$('aiKey').value.trim()};
+    await api('/api/workflow', {name:$('workflowName').value.trim(), task:$('workflowTask').value.trim(), folder:$('workflowFolder').value.trim(), ai:ai});
+    $('workflowName').value = '';
+    setLog('success', '工作流模板已保存');
+    await loadWorkflows();
+  } catch (error) { setLog('error', error.message); }
+  finally { workflowBusy = false; renderWorkflows(); }
 };
 $('pickFolder').onclick = () => openPath($('folder').value.trim(), 'folder', '已打开数据来源文件夹');
 $('approveApproval').onclick = () => decideApproval('approve');
@@ -235,3 +330,5 @@ renderHistory();
 controls();
 loadJobs(true).catch(error => { $('serviceStatus').innerHTML = '<i></i> 服务未连接'; setLog('error', error.message); });
 loadSchedules().catch(error => { $('scheduleCount').textContent = '读取失败'; setLog('error', error.message); });
+loadWorkflows().catch(error => { $('workflowCount').textContent = '读取失败'; setLog('error', error.message); });
+loadNotifications().catch(error => { $('notificationCount').textContent = '读取失败'; setLog('error', error.message); });
