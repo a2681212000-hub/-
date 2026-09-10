@@ -21,7 +21,7 @@ def model_plan(task, settings=None):
         plan["reason"] = "未配置模型，使用本地规划器"
         return plan
     payload = {"model": settings.get("model") or os.getenv("AI_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [
-        {"role": "system", "content": '你是办公自动化规划器。只能返回 JSON，格式为 {"steps":[{"tool":"list_files|process_report|list_reports","reason":"简短原因"}]}。只能使用这三个工具。报表处理依次选择 list_files、process_report；查看已有报告选择 list_reports。'},
+        {"role": "system", "content": '你是办公自动化规划器。只能返回 JSON，格式为 {"steps":[{"tool":"工具名","reason":"简短原因"}]}。工具名只能从 list_files、process_report、list_reports、extract_pdf、collect_web、list_mail_attachments、archive_files、notify 中选择。涉及发送通知时只选择 notify，它只能生成草稿。'},
         {"role": "user", "content": task}]}
     url = settings.get("base_url") or os.getenv("AI_BASE_URL", "https://api.openai.com/v1/chat/completions")
     request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"}, method="POST")
@@ -86,7 +86,8 @@ class Handler(BaseHTTPRequestHandler):
             plan = model_plan(task, body.get("ai"))
             results = [execute_tool(step["tool"], task, folder) for step in plan["steps"]]
             report_result = next((result for result in reversed(results) if result["tool"] == "process_report"), None)
-            message = report_result["message"] if report_result else "任务完成"
+            errors = [result["error"] for result in results if result.get("error")]
+            message = report_result["message"] if report_result else ("；".join(errors) if errors else "任务完成")
             self._json(200, {"ok": True, "plan": plan, "results": results, "message": message})
         except Exception as exc:
             self._json(400, {"ok": False, "error": str(exc)})

@@ -13,7 +13,7 @@ function renderHistory() {
 }
 renderHistory();
 
-const toolLabels = {list_files:'扫描输入文件', process_report:'处理并生成报告', list_reports:'查看最近报告'};
+const toolLabels = {list_files:'扫描输入文件', process_report:'处理并生成报告', list_reports:'查看最近报告', extract_pdf:'提取 PDF 信息', collect_web:'采集网页数据', list_mail_attachments:'扫描邮件附件', archive_files:'归档文件', notify:'生成通知草稿'};
 function renderPlan(plan) {
   const steps = plan && Array.isArray(plan.steps) ? plan.steps : [];
   $('planBox').hidden = !steps.length;

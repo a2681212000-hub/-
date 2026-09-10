@@ -5,7 +5,10 @@ Usage: python agent.py "处理 data 文件夹里的销售报表"
 import csv
 import json
 import re
+import shutil
 import sys
+import urllib.request
+from html.parser import HTMLParser
 from datetime import datetime
 from pathlib import Path
 
@@ -13,12 +16,19 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 DEFAULT_INPUT = ROOT / "data"
 YINGDAO_INBOX = ROOT / "inbox"
+MAIL_INBOX = ROOT / "mail_inbox"
+ARCHIVE_ROOT = ROOT / "archive"
 DEFAULT_OUTPUT = ROOT / "output"
 
 ALLOWED_TOOLS = {
     "list_files": "扫描输入目录中的 CSV、TSV、XLSX 文件",
     "process_report": "合并、去重、汇总并生成 Excel 报告",
     "list_reports": "查看最近生成的报告",
+    "extract_pdf": "提取 PDF 文本并保存结构化结果",
+    "collect_web": "读取公开网页的标题和链接",
+    "list_mail_attachments": "扫描邮件附件交接目录",
+    "archive_files": "将指定输入文件归档到日期目录",
+    "notify": "生成待发送通知草稿，不直接发送",
 }
 
 FIELD_ALIASES = {
@@ -31,6 +41,30 @@ FIELD_ALIASES = {
 
 def find_files(folder):
     return sorted([p for p in Path(folder).glob("*") if p.suffix.lower() in {".csv", ".tsv", ".xlsx"}])
+
+
+class LinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.title = ""
+        self.links = []
+        self._in_title = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "title":
+            self._in_title = True
+        if tag.lower() == "a":
+            href = dict(attrs).get("href")
+            if href:
+                self.links.append(href)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title += data.strip()
 
 
 def read_table(path):
@@ -94,6 +128,36 @@ def validate(rows, fields):
         if any(v is None for v in row.values()):
             problems.append(f"第 {i} 行存在空字段")
     return problems
+
+
+def extract_pdf(path):
+    try:
+        import pdfplumber
+    except ImportError as exc:
+        raise RuntimeError("PDF 提取需要 pdfplumber，请运行: python -m pip install pdfplumber") from exc
+    pages = []
+    with pdfplumber.open(path) as pdf:
+        for number, page in enumerate(pdf.pages, 1):
+            pages.append({"page": number, "text": (page.extract_text() or "").strip()})
+    result_path = DEFAULT_OUTPUT / f"{path.stem}_extracted.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps({"source": str(path), "pages": pages}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"source": str(path), "pages": len(pages), "output": str(result_path), "preview": " ".join(p["text"] for p in pages)[:240]}
+
+
+def collect_web(url):
+    if not re.match(r"^https?://", url, re.I):
+        raise ValueError("网页采集只接受 http/https 地址")
+    request = urllib.request.Request(url, headers={"User-Agent": "OfficeAgent/1.0"})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        body = response.read(2_000_000).decode("utf-8", errors="replace")
+    parser = LinkParser()
+    parser.feed(body)
+    result = {"url": url, "title": parser.title, "links": parser.links[:50], "link_count": len(parser.links)}
+    output = DEFAULT_OUTPUT / "web_capture.json"
+    output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    result["output"] = str(output)
+    return result
 
 
 def analyse_sales(rows):
@@ -160,6 +224,16 @@ def understand(text):
 def plan_task(text):
     """Create a local fallback plan using only registered tools."""
     lowered = text.lower()
+    if any(word in text for word in ["PDF", "pdf", "提取文字", "解析文档"]):
+        return {"steps": [{"tool": "extract_pdf", "reason": "提取 PDF 文本"}]}
+    if any(word in text for word in ["网页", "网址", "采集网页", "抓取"]):
+        return {"steps": [{"tool": "collect_web", "reason": "读取公开网页信息"}]}
+    if any(word in text for word in ["邮件附件", "邮箱附件", "mail"]):
+        return {"steps": [{"tool": "list_mail_attachments", "reason": "扫描邮件附件交接目录"}]}
+    if any(word in text for word in ["归档", "整理文件"]):
+        return {"steps": [{"tool": "archive_files", "reason": "将输入文件归档"}]}
+    if any(word in text for word in ["通知草稿", "消息草稿"]):
+        return {"steps": [{"tool": "notify", "reason": "生成通知草稿"}]}
     if any(word in text for word in ["最近报告", "历史报告", "生成过的报告"]) or "report" in lowered:
         return {"steps": [{"tool": "list_reports", "reason": "查看最近生成的报告"}]}
     if any(word in text for word in ["扫描", "查找文件", "有哪些文件", "文件列表"]):
@@ -179,6 +253,36 @@ def execute_tool(tool, task, folder):
     if tool == "list_reports":
         files = sorted(DEFAULT_OUTPUT.glob("report_*.xlsx"), key=lambda path: path.stat().st_mtime, reverse=True)
         return {"tool": tool, "reports": [str(path) for path in files[:10]], "count": min(len(files), 10)}
+    if tool == "extract_pdf":
+        pdfs = sorted(folder.glob("*.pdf"))
+        if not pdfs:
+            return {"tool": tool, "error": f"目录中没有 PDF：{folder}"}
+        return {"tool": tool, "files": [extract_pdf(path) for path in pdfs]}
+    if tool == "collect_web":
+        url_match = re.search(r"https?://[^\s，。]+", task, re.I)
+        if not url_match:
+            return {"tool": tool, "error": "请在任务中提供公开网页 URL"}
+        return {"tool": tool, **collect_web(url_match.group(0))}
+    if tool == "list_mail_attachments":
+        files = sorted(path for path in MAIL_INBOX.glob("*") if path.is_file() and path.name != ".gitkeep")
+        return {"tool": tool, "handoff_dir": str(MAIL_INBOX), "files": [str(path) for path in files], "count": len(files)}
+    if tool == "archive_files":
+        files = find_files(folder)
+        target = ARCHIVE_ROOT / datetime.now().strftime("%Y-%m-%d")
+        target.mkdir(parents=True, exist_ok=True)
+        archived = []
+        for path in files:
+            destination = target / path.name
+            if destination.exists():
+                destination = target / f"{path.stem}_{datetime.now():%H%M%S}{path.suffix}"
+            shutil.move(str(path), str(destination))
+            archived.append(str(destination))
+        return {"tool": tool, "archived": archived, "count": len(archived), "target": str(target)}
+    if tool == "notify":
+        draft = {"title": "Office Agent 任务通知", "body": f"任务：{task}\n请查看最新执行结果。", "sent": False, "reason": "通知工具当前为草稿模式，需配置渠道并人工确认"}
+        output = DEFAULT_OUTPUT / "notification_draft.json"
+        output.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"tool": tool, **draft, "output": str(output)}
     if tool == "process_report":
         message = run(task, folder_override=folder)
         summary_file = DEFAULT_OUTPUT / "last_run.json"
