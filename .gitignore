@@ -1,6 +1,11 @@
 output/*.xlsx
 output/*.csv
 output/last_run.json
+output/*.json
+archive/*
+!archive/.gitkeep
+mail_inbox/*
+!mail_inbox/.gitkeep
 inbox/*
 !inbox/.gitkeep
 __pycache__/
