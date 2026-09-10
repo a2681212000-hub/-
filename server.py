@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from agent import ALLOWED_TOOLS, DEFAULT_INPUT, plan_task
+from scheduler import ScheduleConflict, ScheduleStore
 from workflow import TaskConflict, TaskStore
 
 ROOT = Path(__file__).parent
@@ -54,6 +55,13 @@ def validate_plan(plan, task):
             raise ValueError("模型执行计划包含未知工具")
         safe_steps.append({"tool": tool, "reason": str(item.get("reason", ""))[:80]})
     return {"steps": safe_steps}
+
+
+def submit_scheduled_task(task, folder):
+    return STORE.create(task, folder, model_plan(task))
+
+
+SCHEDULES = ScheduleStore(ROOT / "runtime" / "schedules", submit_scheduled_task)
 
 
 def open_local_path(raw_path, mode="folder"):
@@ -118,6 +126,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/tasks":
             self._json(200, {"ok": True, "tasks": STORE.recent()})
             return
+        if self.path == "/api/schedules":
+            self._json(200, {"ok": True, "schedules": SCHEDULES.list()})
+            return
         match = re.fullmatch(r"/api/task/([a-f0-9]+)/?", self.path)
         if match:
             try:
@@ -141,6 +152,35 @@ class Handler(BaseHTTPRequestHandler):
                 opened = open_local_path(body.get("path"), body.get("mode", "folder"))
                 self._json(200, {"ok": True, "opened": opened})
             except (OSError, ValueError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/schedule":
+            try:
+                body = self._body()
+                task = body.get("task", "处理报表")
+                name = body.get("name")
+                if not name and isinstance(task, str):
+                    name = task[:30]
+                schedule = SCHEDULES.create(name, task, body.get("folder"), body.get("interval_minutes", 60))
+                self._json(201, {"ok": True, "schedule": schedule})
+            except (ValueError, KeyError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
+        schedule_match = re.fullmatch(r"/api/schedule/([a-f0-9]+)/(toggle|run|delete)", self.path)
+        if schedule_match:
+            schedule_id, action = schedule_match.groups()
+            try:
+                if action == "toggle":
+                    body = self._body()
+                    result = {"schedule": SCHEDULES.set_enabled(schedule_id, body.get("enabled"))}
+                elif action == "run":
+                    result = SCHEDULES.run_now(schedule_id)
+                else:
+                    result = {"schedule": SCHEDULES.remove(schedule_id)}
+                self._json(200, {"ok": True, **result})
+            except ScheduleConflict as exc:
+                self._json(409, {"ok": False, "error": str(exc)})
+            except (KeyError, ValueError) as exc:
                 self._json(400, {"ok": False, "error": str(exc)})
             return
         decision_match = re.fullmatch(r"/api/task/([a-f0-9]+)/decision", self.path)

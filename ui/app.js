@@ -7,12 +7,15 @@ const aiSettings = stored('office-agent-ai', {});
 $('aiBaseUrl').value = aiSettings.base_url || '';
 $('aiModel').value = aiSettings.model || '';
 let jobs = [];
+let schedules = [];
 let activeJob = null;
 let busy = false;
+let scheduleBusy = false;
 let pollTimer = null;
 const toolLabels = {list_files:'扫描输入文件', process_report:'处理并生成报告', list_reports:'查看最近报告', extract_pdf:'提取 PDF 信息', collect_web:'采集网页数据', list_mail_attachments:'扫描邮件附件', archive_files:'归档文件', notify:'生成通知草稿'};
 const statusLabels = {running:'正在执行', pending:'待执行', approved:'已确认', awaiting_confirmation:'等待确认', completed:'已完成', cancelled:'已取消', expired:'确认已过期', failed:'执行失败', interrupted:'执行中断', skipped:'未执行'};
 const dateText = value => new Date(value).toLocaleString('zh-CN', {hour12:false});
+const scheduleDate = value => value ? dateText(value * 1000) : '未安排';
 
 async function api(path, body) {
   const options = body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
@@ -61,6 +64,33 @@ function renderJobs() {
     button.onclick = () => selectJob(job.id);
     row.append(button, node('span', statusLabels[job.status] || job.status, 'job-status ' + job.status), node('time', dateText(job.created_at)));
     $('jobsList').append(row);
+  });
+}
+function renderSchedules() {
+  $('schedulesList').replaceChildren();
+  $('scheduleCount').textContent = schedules.filter(schedule => schedule.enabled).length + ' 个启用';
+  if (!schedules.length) {
+    $('schedulesList').append(node('div', '还没有自动任务', 'empty'));
+    return;
+  }
+  schedules.forEach(schedule => {
+    const row = node('div', '', 'schedule-row' + (schedule.enabled ? '' : ' disabled'));
+    const detail = node('div', '', 'schedule-main');
+    detail.append(node('strong', schedule.name), node('span', schedule.task, 'schedule-task'), node('small', schedule.folder + ' · 每 ' + schedule.interval_minutes + ' 分钟，下次 ' + scheduleDate(schedule.next_run_at)));
+    const actions = node('div', '', 'schedule-actions');
+    const run = node('button', '立即运行', 'text-button schedule-button');
+    run.disabled = scheduleBusy || schedule.running;
+    run.onclick = () => runSchedule(schedule.id);
+    const toggle = node('button', schedule.enabled ? '停用' : '启用', 'secondary schedule-button');
+    toggle.disabled = scheduleBusy || schedule.running;
+    toggle.onclick = () => toggleSchedule(schedule);
+    const remove = node('button', '删除', 'secondary schedule-button');
+    remove.disabled = scheduleBusy || schedule.running;
+    remove.onclick = () => removeSchedule(schedule);
+    actions.append(run, toggle, remove);
+    row.append(detail, actions);
+    if (schedule.last_status) row.append(node('div', '上次：' + (statusLabels[schedule.last_status] || schedule.last_status) + ' · ' + (schedule.last_message || ''), 'schedule-last'));
+    $('schedulesList').append(row);
   });
 }
 function renderJob(job) {
@@ -126,6 +156,33 @@ async function loadJobs(restore) {
   renderJobs();
   schedulePoll();
 }
+async function loadSchedules() {
+  const data = await api('/api/schedules');
+  schedules = data.schedules;
+  renderSchedules();
+}
+async function toggleSchedule(schedule) {
+  scheduleBusy = true; renderSchedules();
+  try { await api('/api/schedule/' + schedule.id + '/toggle', {enabled:!schedule.enabled}); await loadSchedules(); }
+  catch (error) { setLog('error', error.message); }
+  finally { scheduleBusy = false; renderSchedules(); }
+}
+async function runSchedule(id) {
+  scheduleBusy = true; renderSchedules();
+  try {
+    const data = await api('/api/schedule/' + id + '/run', {});
+    if (data.job) { renderJob(data.job); remember(data.job); schedulePoll(); }
+    await Promise.all([loadSchedules(), loadJobs(false)]);
+  } catch (error) { setLog('error', error.message); }
+  finally { scheduleBusy = false; renderSchedules(); }
+}
+async function removeSchedule(schedule) {
+  if (!confirm('删除自动任务“' + schedule.name + '”？')) return;
+  scheduleBusy = true; renderSchedules();
+  try { await api('/api/schedule/' + schedule.id + '/delete', {}); await loadSchedules(); }
+  catch (error) { setLog('error', error.message); }
+  finally { scheduleBusy = false; renderSchedules(); }
+}
 async function selectJob(id) {
   if (busy) return;
   try { const data = await api('/api/task/' + id); renderJob(data.job); remember(data.job); schedulePoll(); }
@@ -149,7 +206,19 @@ $('runBtn').onclick = async () => {
   const ai = {base_url:$('aiBaseUrl').value.trim(), model:$('aiModel').value.trim(), api_key:$('aiKey').value.trim()};
   try { const data = await api('/api/task', {task:$('task').value, folder:$('folder').value, ai:ai}); renderJob(data.job); remember(data.job); }
   catch (error) { $('resultTitle').textContent = '请求失败'; setLog('error', error.message); }
-  finally { busy = false; controls(); await loadJobs(false).catch(error => setLog('error', error.message)); }
+  finally { busy = false; controls(); await Promise.all([loadJobs(false), loadSchedules()]).catch(error => setLog('error', error.message)); }
+};
+$('scheduleForm').onsubmit = async event => {
+  event.preventDefault();
+  if (scheduleBusy) return;
+  scheduleBusy = true; renderSchedules();
+  try {
+    await api('/api/schedule', {name:$('scheduleName').value.trim(), task:$('scheduleTask').value.trim(), folder:$('scheduleFolder').value.trim(), interval_minutes:Number($('scheduleInterval').value)});
+    $('scheduleName').value = '';
+    setLog('success', '自动任务已添加');
+    await loadSchedules();
+  } catch (error) { setLog('error', error.message); }
+  finally { scheduleBusy = false; renderSchedules(); }
 };
 $('pickFolder').onclick = () => openPath($('folder').value.trim(), 'folder', '已打开数据来源文件夹');
 $('approveApproval').onclick = () => decideApproval('approve');
@@ -165,3 +234,4 @@ $('clearLocal').onclick = () => { history = []; localStorage.removeItem('office-
 renderHistory();
 controls();
 loadJobs(true).catch(error => { $('serviceStatus').innerHTML = '<i></i> 服务未连接'; setLog('error', error.message); });
+loadSchedules().catch(error => { $('scheduleCount').textContent = '读取失败'; setLog('error', error.message); });
