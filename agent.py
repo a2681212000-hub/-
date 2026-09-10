@@ -5,7 +5,6 @@ Usage: python agent.py "处理 data 文件夹里的销售报表"
 import csv
 import json
 import re
-import shutil
 import sys
 import urllib.request
 from html.parser import HTMLParser
@@ -40,7 +39,8 @@ FIELD_ALIASES = {
 
 
 def find_files(folder):
-    return sorted([p for p in Path(folder).glob("*") if p.suffix.lower() in {".csv", ".tsv", ".xlsx"}])
+    return sorted(p for p in Path(folder).glob("*") if p.is_file() and not p.is_symlink()
+                  and p.suffix.lower() in {".csv", ".tsv", ".xlsx"})
 
 
 class LinkParser(HTMLParser):
@@ -224,9 +224,16 @@ def understand(text):
 def plan_task(text):
     """Create a local fallback plan using only registered tools."""
     lowered = text.lower()
-    if any(word in text for word in ["PDF", "pdf", "提取文字", "解析文档"]):
+    if any(word in text for word in ["归档", "整理文件"]):
+        steps = []
+        if any(word in lowered for word in ["报表", "汇总", "合并", "excel", "csv"]):
+            steps = [{"tool": "list_files", "reason": "确认输入文件"},
+                     {"tool": "process_report", "reason": "先生成报表"}]
+        steps.append({"tool": "archive_files", "reason": "确认清单后归档输入文件"})
+        return {"steps": steps}
+    if any(word in lowered for word in ["pdf", "提取文字", "解析文档"]):
         return {"steps": [{"tool": "extract_pdf", "reason": "提取 PDF 文本"}]}
-    if any(word in text for word in ["网页", "网址", "采集网页", "抓取"]):
+    if any(word in text for word in ["网页", "网址", "采集网页", "抓取"]) and "报表" not in text:
         return {"steps": [{"tool": "collect_web", "reason": "读取公开网页信息"}]}
     if any(word in text for word in ["邮件附件", "邮箱附件", "mail"]):
         return {"steps": [{"tool": "list_mail_attachments", "reason": "扫描邮件附件交接目录"}]}
@@ -267,28 +274,34 @@ def execute_tool(tool, task, folder):
         files = sorted(path for path in MAIL_INBOX.glob("*") if path.is_file() and path.name != ".gitkeep")
         return {"tool": tool, "handoff_dir": str(MAIL_INBOX), "files": [str(path) for path in files], "count": len(files)}
     if tool == "archive_files":
-        files = find_files(folder)
-        target = ARCHIVE_ROOT / datetime.now().strftime("%Y-%m-%d")
-        target.mkdir(parents=True, exist_ok=True)
-        archived = []
-        for path in files:
-            destination = target / path.name
-            if destination.exists():
-                destination = target / f"{path.stem}_{datetime.now():%H%M%S}{path.suffix}"
-            shutil.move(str(path), str(destination))
-            archived.append(str(destination))
-        return {"tool": tool, "archived": archived, "count": len(archived), "target": str(target)}
+        raise PermissionError("归档必须通过任务确认接口执行")
     if tool == "notify":
+        DEFAULT_OUTPUT.mkdir(parents=True, exist_ok=True)
         draft = {"title": "Office Agent 任务通知", "body": f"任务：{task}\n请查看最新执行结果。", "sent": False, "reason": "通知工具当前为草稿模式，需配置渠道并人工确认"}
         output = DEFAULT_OUTPUT / "notification_draft.json"
         output.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"tool": tool, **draft, "output": str(output)}
     if tool == "process_report":
-        message = run(task, folder_override=folder)
-        summary_file = DEFAULT_OUTPUT / "last_run.json"
-        details = json.loads(summary_file.read_text(encoding="utf-8")) if summary_file.exists() else {}
-        return {"tool": tool, "message": message, "output": details.get("output"), "rows": details.get("rows", 0), "problems": details.get("problems", [])}
+        return {"tool": tool, **process_report(folder)}
     raise ValueError(f"不允许调用工具：{tool}")
+
+
+def process_report(folder):
+    files = find_files(folder)
+    if not files:
+        return {"error": f"未找到 CSV/TSV/XLSX 文件：{folder}"}
+    rows, fields = merge_reports(files)
+    if not rows:
+        return {"error": "输入报表没有数据行"}
+    problems = validate(rows, fields)
+    summary_rows, anomalies = analyse_sales(rows)
+    problems.extend(f"{len(anomalies)} 行销售额异常" for _ in [0] if anomalies)
+    output = DEFAULT_OUTPUT / f"report_{datetime.now():%Y%m%d_%H%M%S_%f}.xlsx"
+    write_report(rows, fields, output, summary_rows, anomalies)
+    summary = {"files": [str(x) for x in files], "rows": len(rows), "output": str(output), "problems": problems, "anomalies": anomalies, "summary": summary_rows}
+    (DEFAULT_OUTPUT / "last_run.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary["message"] = f"处理完成：读取 {len(files)} 个文件，输出 {len(rows)} 行。\n报告：{output}\n" + ("异常：" + "；".join(problems) if problems else "校验通过")
+    return summary
 
 
 def run(task, folder_override=None):
@@ -296,21 +309,10 @@ def run(task, folder_override=None):
     if intent["action"] == "help":
         return "我目前支持：处理/合并销售报表、去重、检查空字段、生成汇总文件。"
     folder = Path(folder_override) if folder_override else intent["folder"]
-    # A Yingdao RAP flow exports its web results into inbox, then calls this agent.
-    if folder == DEFAULT_INPUT and YINGDAO_INBOX.exists() and find_files(YINGDAO_INBOX):
+    if folder_override is None and folder == DEFAULT_INPUT and find_files(YINGDAO_INBOX):
         folder = YINGDAO_INBOX
-    files = find_files(folder)
-    if not files:
-        return f"未找到 CSV/TSV/XLSX 文件：{folder}"
-    rows, fields = merge_reports(files)
-    problems = validate(rows, fields)
-    summary_rows, anomalies = analyse_sales(rows)
-    problems.extend(f"{len(anomalies)} 行销售额异常" for _ in [0] if anomalies)
-    output = DEFAULT_OUTPUT / f"report_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
-    write_report(rows, fields, output, summary_rows, anomalies)
-    summary = {"files": [str(x) for x in files], "rows": len(rows), "output": str(output), "problems": problems, "anomalies": anomalies, "summary": summary_rows}
-    (DEFAULT_OUTPUT / "last_run.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    return f"处理完成：读取 {len(files)} 个文件，输出 {len(rows)} 行。\n报告：{output}\n" + ("异常：" + "；".join(problems) if problems else "校验通过")
+    result = process_report(folder)
+    return result.get("error") or result["message"]
 
 
 if __name__ == "__main__":

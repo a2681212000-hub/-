@@ -10,7 +10,7 @@
   <main class="shell">
     <header class="topbar">
       <div class="brand"><span class="brand-mark">OA</span><span>Office Agent</span></div>
-      <span class="status"><i></i> 本地服务</span>
+      <span class="status" id="serviceStatus"><i></i> 本地服务</span>
     </header>
 
     <section class="hero">
@@ -42,13 +42,23 @@
         <div class="output-box"><span>报告位置</span><code id="output">尚未生成</code><button id="openReport" title="打开报告">↗</button></div>
         <div class="log" id="log"><span class="log-dot"></span><span>准备就绪，等待你开始任务。</span></div>
         <div class="plan-box" id="planBox" hidden><span class="plan-label">执行计划</span><div id="planSteps"></div></div>
+        <div class="approval-box" id="approvalBox" hidden>
+          <div><span class="approval-label">需要确认</span><strong id="approvalTitle">即将执行敏感操作</strong><p id="approvalDetail"></p><p id="approvalExpiry"></p></div>
+          <ol class="approval-files" id="approvalFiles"></ol>
+          <div class="approval-actions"><button class="secondary" id="cancelApproval">取消</button><button class="primary" id="approveApproval">确认执行</button></div>
+        </div>
+        <details class="task-details" id="taskDetails" hidden><summary>执行记录</summary><ol id="taskEvents"></ol><pre id="taskResults"></pre></details>
       </div>
     </section>
 
-    <section class="recent">
+  <section class="recent">
       <div class="section-head"><div><p class="label">最近执行</p><h2>任务记录</h2></div><button class="text-button" id="clearHistory">清空记录</button></div>
       <div class="history" id="history"><div class="empty">还没有执行记录</div></div>
-    </section>
+  </section>
+  <section class="recent task-history">
+    <div class="section-head"><div><p class="label">TASKS</p><h2>任务与确认</h2></div><span class="hint" id="taskCount"></span></div>
+    <div class="jobs-list" id="jobsList"><div class="empty">正在读取任务记录</div></div>
+  </section>
   </main>
   <button class="settings-fab" id="settingsBtn" title="打开设置">⚙</button>
   <div class="settings-overlay" id="settingsOverlay" hidden>
