@@ -131,6 +131,11 @@ async function selectJob(id) {
   try { const data = await api('/api/task/' + id); renderJob(data.job); remember(data.job); schedulePoll(); }
   catch (error) { setLog('error', error.message); }
 }
+async function openPath(path, mode, successMessage) {
+  if (!path || path === '尚未生成') return;
+  try { await api('/api/open-path', {path:path, mode:mode}); setLog('success', successMessage); }
+  catch (error) { setLog('error', error.message); }
+}
 async function decideApproval(decision) {
   if (busy || !activeJob || activeJob.status !== 'awaiting_confirmation') return;
   busy = true; controls();
@@ -146,10 +151,11 @@ $('runBtn').onclick = async () => {
   catch (error) { $('resultTitle').textContent = '请求失败'; setLog('error', error.message); }
   finally { busy = false; controls(); await loadJobs(false).catch(error => setLog('error', error.message)); }
 };
+$('pickFolder').onclick = () => openPath($('folder').value.trim(), 'folder', '已打开数据来源文件夹');
 $('approveApproval').onclick = () => decideApproval('approve');
 $('cancelApproval').onclick = () => decideApproval('cancel');
 $('clearHistory').onclick = () => { history = []; localStorage.removeItem('office-agent-history'); renderHistory(); };
-$('openReport').onclick = () => { if (!$('openReport').disabled) alert($('output').textContent); };
+$('openReport').onclick = () => { if (!$('openReport').disabled) openPath($('output').textContent, 'reveal', '已打开报告所在文件夹'); };
 $('settingsBtn').onclick = () => { $('settingsOverlay').hidden = false; $('aiBaseUrl').focus(); };
 $('closeSettings').onclick = () => { $('settingsOverlay').hidden = true; $('settingsBtn').focus(); };
 $('settingsOverlay').onclick = event => { if (event.target === $('settingsOverlay')) $('settingsOverlay').hidden = true; };

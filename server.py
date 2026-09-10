@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import subprocess
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,6 +55,26 @@ def validate_plan(plan, task):
             raise ValueError("模型执行计划包含未知工具")
         safe_steps.append({"tool": tool, "reason": str(item.get("reason", ""))[:80]})
     return {"steps": safe_steps}
+
+
+def open_local_path(raw_path, mode="folder"):
+    """Open a local folder in Explorer without passing user input through a shell."""
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("路径不能为空")
+    if not isinstance(mode, str) or mode not in {"folder", "reveal"}:
+        raise ValueError("打开方式无效")
+    path = Path(raw_path).expanduser().resolve()
+    if mode == "folder":
+        if not path.is_dir():
+            raise ValueError(f"文件夹不存在：{path}")
+        target = path
+        subprocess.Popen(["explorer.exe", str(path)])
+    else:
+        if not path.is_file():
+            raise ValueError(f"文件不存在：{path}")
+        target = path.parent
+        subprocess.Popen(["explorer.exe", f"/select,{path}"])
+    return {"path": str(path), "folder": str(target), "mode": mode}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -113,6 +134,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._local_request():
             self._json(403, {"ok": False, "error": "不允许跨来源操作"}); return
+        if self.path == "/api/open-path":
+            try:
+                body = self._body()
+                opened = open_local_path(body.get("path"), body.get("mode", "folder"))
+                self._json(200, {"ok": True, "opened": opened})
+            except (OSError, ValueError) as exc:
+                self._json(400, {"ok": False, "error": str(exc)})
+            return
         decision_match = re.fullmatch(r"/api/task/([a-f0-9]+)/decision", self.path)
         if decision_match:
             try:

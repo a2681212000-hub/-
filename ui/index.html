@@ -28,7 +28,7 @@
         <label for="task">任务描述</label>
         <textarea id="task">处理网页采集报表</textarea>
         <label for="folder">数据来源</label>
-        <div class="folder-input"><span class="folder-icon">↳</span><input id="folder" value="D:\\ai\\office-agent\\inbox"><button id="pickFolder" title="选择目录">选择</button></div>
+        <div class="folder-input"><span class="folder-icon">↳</span><input id="folder" value="D:\\ai\\office-agent\\inbox"><button id="pickFolder" title="打开数据来源文件夹">选择</button></div>
         <div class="action-row"><button class="primary" id="runBtn"><span>▶</span> 开始处理</button><span class="hint">支持 CSV、TSV、XLSX</span></div>
       </div>
 
@@ -39,7 +39,7 @@
           <div><span>输出行数</span><strong id="rows">—</strong></div>
           <div><span>异常数量</span><strong id="issues">—</strong></div>
         </div>
-        <div class="output-box"><span>报告位置</span><code id="output">尚未生成</code><button id="openReport" title="打开报告">↗</button></div>
+        <div class="output-box"><span>报告位置</span><code id="output">尚未生成</code><button id="openReport" title="打开报告所在文件夹">↗</button></div>
         <div class="log" id="log"><span class="log-dot"></span><span>准备就绪，等待你开始任务。</span></div>
         <div class="plan-box" id="planBox" hidden><span class="plan-label">执行计划</span><div id="planSteps"></div></div>
         <div class="approval-box" id="approvalBox" hidden>

@@ -48,6 +48,8 @@ python server.py
 {"task":"处理网页采集报表","folder":"D:\\ai\\office-agent\\inbox"}
 ```
 
+网页中的“选择”按钮会调用 `POST /api/open-path` 打开数据来源文件夹；报告位置右侧的箭头会打开报告所在文件夹并选中报告文件。该接口只接受本机同源请求。
+
 如需让 AI 参与任务规划，配置 OpenAI 兼容接口：
 
 ```powershell
