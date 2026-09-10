@@ -2,7 +2,6 @@
 import json
 import os
 import re
-import subprocess
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -58,7 +57,7 @@ def validate_plan(plan, task):
 
 
 def open_local_path(raw_path, mode="folder"):
-    """Open a local folder in Explorer without passing user input through a shell."""
+    """Open a local folder through the Windows shell."""
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise ValueError("路径不能为空")
     if not isinstance(mode, str) or mode not in {"folder", "reveal"}:
@@ -68,12 +67,14 @@ def open_local_path(raw_path, mode="folder"):
         if not path.is_dir():
             raise ValueError(f"文件夹不存在：{path}")
         target = path
-        subprocess.Popen(["explorer.exe", str(path)])
     else:
         if not path.is_file():
             raise ValueError(f"文件不存在：{path}")
         target = path.parent
-        subprocess.Popen(["explorer.exe", f"/select,{path}"])
+    try:
+        os.startfile(str(target))
+    except AttributeError as exc:
+        raise OSError("当前系统不支持打开本地文件夹") from exc
     return {"path": str(path), "folder": str(target), "mode": mode}
 
 
